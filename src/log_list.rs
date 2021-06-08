@@ -84,29 +84,58 @@ struct CTList {
     operators: Vec<Operator>,
 }
 
-pub fn get_logs(client: reqwest::blocking::Client) -> Vec<crate::client::CTLog> {
+pub fn get_logs(client: reqwest::blocking::Client) -> Result<Vec<crate::client::CTLog>, String> {
     info!("Fetching list of CT logs from Google");
-    let list = client.get(LOG_LIST_URL)
-        .send().expect("Unable to download CT list")
-        .bytes().expect("Unable to read CT list");
-    let list_obj = serde_json::from_slice::<CTList>(&list)
-        .expect("Unable to decode CT list");
-    let list_sig = client.get(LOG_LIST_SIG_URL)
-        .send().expect("Unable to download CT list signature")
-        .bytes().expect("Unable to read CT list signature");
+    let list = match match client.get(LOG_LIST_URL).send() {
+        Ok(v) => v,
+        Err(err) => {
+            return Err(format!("unable to download CT list: {}", err));
+        }
+    }.bytes() {
+        Ok(v) => v,
+        Err(err) => {
+            return Err(format!("unable to read CT list: {}", err));
+        }
+    };
+    let list_obj = match serde_json::from_slice::<CTList>(&list) {
+        Ok(v) => v,
+        Err(err) => {
+            return Err(format!("unable to decode CT list: {}", err));
+        }
+    };
+    let list_sig = match match client.get(LOG_LIST_SIG_URL).send() {
+        Ok(v) => v,
+        Err(err) => {
+            return Err(format!("unable to download CT list signature: {}", err));
+        }
+    }.bytes() {
+        Ok(v) => v,
+        Err(err) => {
+            return Err(format!("unable to read CT list signature: {}", err));
+        }
+    };
 
     let pub_key = openssl::pkey::PKey::public_key_from_pem(LOG_LIST_KEY.as_bytes())
         .expect("Unable to decode CT list signing key");
-    let mut verifier = openssl::sign::Verifier::new(
+    let mut verifier = match openssl::sign::Verifier::new(
         openssl::hash::MessageDigest::sha256(),
-        &pub_key
-    ).expect("Unable to create CT list verifier");
+        &pub_key,
+    ) {
+        Ok(v) => v,
+        Err(err) => {
+            return Err(format!("unable to create CT list verifier: {}", err));
+        }
+    };
 
-    let verified = verifier.verify_oneshot(&list_sig, &list)
-        .expect("Unable to verify CT list signature");
+    let verified = match verifier.verify_oneshot(&list_sig, &list) {
+        Ok(v) => v,
+        Err(err) => {
+            return Err(format!("unable to verify CT list signature: {}", err));
+        }
+    };
 
     if !verified {
-        panic!("CT list signature does not verify");
+        return Err("CT list signature does not verify".to_string());
     }
 
     let mut out = vec![];
@@ -120,14 +149,24 @@ pub fn get_logs(client: reqwest::blocking::Client) -> Vec<crate::client::CTLog> 
                 out.push(crate::client::CTLog {
                     name,
                     id: log.log_id,
-                    public_key: openssl::pkey::PKey::public_key_from_der(
-                    &base64::decode(log.key).expect("Invalid base64 in key")
-                    ).expect("Invalid public key"),
+                    public_key: match openssl::pkey::PKey::public_key_from_der(
+                        match &base64::decode(log.key) {
+                            Ok(v) => v,
+                            Err(err) => {
+                                return Err(format!("invalid base64 encoding: {}", err));
+                            }
+                        }
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => {
+                            return Err(format!("invalid public key: {}", err));
+                        }
+                    },
                     url: log.url,
                     mmd: chrono::Duration::seconds(log.mmd as i64),
                 })
             }
         }
     }
-    out
+    Ok(out)
 }

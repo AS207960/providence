@@ -9,15 +9,17 @@ pub struct CTWatcher<'a, S: CTLogStorage> {
     log: crate::client::CTLog,
     tree: crate::tree::CompactMerkleTree,
     storage: &'a S,
+    cancel: std::sync::mpsc::Receiver<()>
 }
 
 impl<'a, S: CTLogStorage> CTWatcher<'a, S> {
-    pub fn new(client: reqwest::blocking::Client, log: crate::client::CTLog, storage: &'a S) -> Self {
+    pub fn new(client: reqwest::blocking::Client, log: crate::client::CTLog, storage: &'a S, cancel: std::sync::mpsc::Receiver<()>) -> Self {
         CTWatcher {
             client,
             log,
             tree: crate::tree::CompactMerkleTree::new(),
             storage,
+            cancel,
         }
     }
 
@@ -48,6 +50,17 @@ impl<'a, S: CTLogStorage> CTWatcher<'a, S> {
 
         info!("Watching '{}'...", self.log.name);
         'outer: loop {
+            match self.cancel.try_recv() {
+                Ok(_) => {
+                    info!("Watcher for '{}' ending", self.log.name);
+                    break 'outer;
+                },
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    panic!("Receiver disconnected");
+                }
+            }
+
             if sth.tree_size != self.tree.tree_size() {
                 let tree_size = self.tree.tree_size();
                 let entries_iter = crate::client::GetEntries::new(
