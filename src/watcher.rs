@@ -80,7 +80,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                             Ok(_) => {}
                             Err(err) => {
                                 error!("Unable to append new entry from '{}' to tree: {}", log_name, err);
-                                return;
+                                return None;
                             }
                         }
                         let new_size = new_tree.tree_size();
@@ -95,7 +95,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                             }
                         }
                     }
-                   new_tree
+                    Some(new_tree)
                 });
 
                 let entries_iter = crate::client::GetEntries::new(
@@ -120,7 +120,12 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                         }
                     }
                 }
-                let mut new_tree = new_tree_h.join().unwrap();
+                let mut new_tree = match new_tree_h.join().unwrap() {
+                    Some(v) => v,
+                    None => {
+                        continue 'outer;
+                    }
+                };
                 assert_eq!(processed_entries, sth.tree_size - tree_size);
                 assert_eq!(sth.tree_size, new_tree.tree_size());
                 let mth = match new_tree.root_hash() {
