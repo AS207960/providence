@@ -65,12 +65,11 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                 let tree_size = self.tree.tree_size();
 
                 let (entry_tx, entry_rx) = std::sync::mpsc::channel();
-                let (tree_tx, tree_rx) = std::sync::mpsc::channel();
                 let mut new_tree = self.tree.clone();
                 let log_name = self.log.name.clone();
                 let log_id = self.log.id.clone();
                 let storage = self.storage.clone();
-                std::thread::spawn(move || {
+                let new_tree_h = std::thread::spawn(move || {
                     let mut last_save = new_tree.tree_size();
                     loop {
                         let entries: Vec<_> = match entry_rx.recv() {
@@ -96,7 +95,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                             }
                         }
                     }
-                    tree_tx.send(new_tree).unwrap();
+                   new_tree
                 });
 
                 let entries_iter = crate::client::GetEntries::new(
@@ -121,7 +120,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                         }
                     }
                 }
-                let mut new_tree = tree_rx.recv().unwrap();
+                let mut new_tree = new_tree_h.join().unwrap();
                 assert_eq!(processed_entries, sth.tree_size - tree_size);
                 assert_eq!(sth.tree_size, new_tree.tree_size());
                 let mth = match new_tree.root_hash() {

@@ -87,18 +87,16 @@ impl CompactMerkleTree {
             let k = 2_usize.pow((((width - 1) as f64).log(2.0).floor()) as u32);
             assert!(k < width as usize);
             assert!(width as usize <= 2 * k);
-            let (left_tx, left_rx) = std::sync::mpsc::channel();
-            let (right_tx, right_rx) = std::sync::mpsc::channel();
             let left_leaves = leaves[0..k].to_vec();
             let right_leaves = leaves[k..].to_vec();
-            std::thread::spawn(move || {
-                left_tx.send(Self::hash_full(left_leaves)).unwrap();
+            let left_h = std::thread::spawn(move || {
+                Self::hash_full(left_leaves)
             });
-            std::thread::spawn(move || {
-                right_tx.send(Self::hash_full(right_leaves)).unwrap();
+            let right_h = std::thread::spawn(move || {
+                Self::hash_full(right_leaves)
             });
-            let (left_root, mut left_hashes) = left_rx.recv().unwrap()?;
-            let (right_root, mut right_hashes) = right_rx.recv().unwrap()?;
+            let (left_root, mut left_hashes) = left_h.join().unwrap()?;
+            let (right_root, mut right_hashes) = right_h.join().unwrap()?;
             assert_eq!(left_hashes.len(), 1);
             let root_hash = computer_merkle_node_hash(&left_root, &right_root)?;
             let out_hashes = match k * 2 == width {

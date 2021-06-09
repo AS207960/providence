@@ -365,6 +365,7 @@ impl MerkleTreeLeaf {
 
 #[derive(Clone, Debug)]
 pub struct Entry {
+    pub index: u64,
     pub tree_leaf: Option<MerkleTreeLeaf>,
     pub leaf_bytes: Vec<u8>,
     pub extra_data: Vec<u8>,
@@ -393,7 +394,7 @@ impl<'a> GetEntries<'a> {
         }
     }
 
-    fn decode_entry(&self, entry: &EntryJSON) -> Result<Entry, String> {
+    fn decode_entry(&self, entry: &EntryJSON, index: u64) -> Result<Entry, String> {
         let merkle_leaf_bytes = match base64::decode(&entry.leaf_input) {
             Ok(v) => v,
             Err(err) => {
@@ -415,6 +416,7 @@ impl<'a> GetEntries<'a> {
         }
 
         Ok(Entry {
+            index,
             tree_leaf: merkle_leaf,
             leaf_bytes: merkle_leaf_bytes,
             extra_data: extra_bytes,
@@ -470,7 +472,8 @@ impl std::iter::Iterator for GetEntries<'_> {
 
         let remaining = self.size - self.offset;
         let out = entries.entries.into_iter().take(remaining as usize)
-            .map(|e| self.decode_entry(&e)).collect::<Result<Vec<_>, _>>();
+            .enumerate()
+            .map(|(i, e)| self.decode_entry(&e, offset + i as u64)).collect::<Result<Vec<_>, _>>();
 
         Some(out)
     }
