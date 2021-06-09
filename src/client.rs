@@ -376,6 +376,8 @@ pub struct GetEntries<'a> {
     size: u64,
     start_from: u64,
     offset: u64,
+    last_offset: u64,
+    last_offset_time: DateTime<Utc>
 }
 
 impl<'a> GetEntries<'a> {
@@ -386,6 +388,8 @@ impl<'a> GetEntries<'a> {
             size,
             start_from: offset,
             offset: 0,
+            last_offset: 0,
+            last_offset_time: Utc::now(),
         }
     }
 
@@ -452,10 +456,16 @@ impl std::iter::Iterator for GetEntries<'_> {
         self.offset += returned_entries;
         let to_download = self.size - self.start_from;
         let downloaded = self.offset;
-        let download_percent = ((downloaded as f64) / (to_download as f64)) * 100.0;
 
         if downloaded % 100 == 0 || downloaded == to_download {
-            info!("Downloaded {} of {} total '{}' entries ({:.2}%)", downloaded, to_download, self.log.name, download_percent);
+            let now = Utc::now();
+            let download_diff = (downloaded - self.last_offset) as f64;
+            let time_diff = (now - self.last_offset_time).num_seconds() as f64;
+            let download_rate = download_diff / time_diff;
+            self.last_offset = downloaded;
+            self.last_offset_time = now;
+            let download_percent = ((downloaded as f64) / (to_download as f64)) * 100.0;
+            info!("Downloaded {} of {} total '{}' entries ({:.2}%, {:.2} entries/sec)", downloaded, to_download, self.log.name, download_percent, download_rate);
         }
 
         let remaining = self.size - self.offset;
