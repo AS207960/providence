@@ -9,7 +9,7 @@ pub struct CTWatcher<'a, S: CTLogStorage> {
     log: crate::client::CTLog,
     tree: crate::tree::CompactMerkleTree,
     storage: &'a S,
-    cancel: std::sync::mpsc::Receiver<()>
+    cancel: std::sync::mpsc::Receiver<()>,
 }
 
 impl<'a, S: CTLogStorage> CTWatcher<'a, S> {
@@ -54,7 +54,7 @@ impl<'a, S: CTLogStorage> CTWatcher<'a, S> {
                 Ok(_) => {
                     info!("Watcher for '{}' ending", self.log.name);
                     break 'outer;
-                },
+                }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     panic!("Receiver disconnected");
@@ -63,12 +63,34 @@ impl<'a, S: CTLogStorage> CTWatcher<'a, S> {
 
             if sth.tree_size != self.tree.tree_size() {
                 let tree_size = self.tree.tree_size();
+
+                let (entry_tx, entry_rx) = std::sync::mpsc::channel();
+                let (tree_tx, tree_rx) = std::sync::mpsc::channel();
+                let mut new_tree = self.tree.clone();
+                let log_name = self.log.name.clone();
+                std::thread::spawn(move || {
+                    loop {
+                        let entries: Vec<_> = match entry_rx.recv() {
+                            Ok(e) => e,
+                            Err(_) => break
+                        };
+                        match new_tree.extend(&entries) {
+                            Ok(_) => {}
+                            Err(err) => {
+                                error!("Unable to append new entry from '{}' to tree: {}", log_name, err);
+                                return;
+                            }
+                        }
+                    }
+                    tree_tx.send(new_tree).unwrap();
+                });
+
                 let entries_iter = crate::client::GetEntries::new(
-                    &self.client, &self.log, sth.tree_size, tree_size
+                    &self.client, &self.log, sth.tree_size, tree_size,
                 );
                 let mut processed_entries: u64 = 0;
-                for entry in entries_iter {
-                    let entry = match entry {
+                for entries in entries_iter {
+                    let entries = match entries {
                         Ok(v) => v,
                         Err(err) => {
                             warn!("Error getting entries from '{}': {}", self.log.name, err);
@@ -76,19 +98,19 @@ impl<'a, S: CTLogStorage> CTWatcher<'a, S> {
                             continue;
                         }
                     };
-                    processed_entries += 1;
-                    match self.tree.append(&entry.leaf_bytes) {
+                    processed_entries += entries.len() as u64;
+                    match entry_tx.send(entries.into_iter().map(|e| e.leaf_bytes).collect::<Vec<Vec<u8>>>()) {
                         Ok(_) => {}
-                        Err(err) => {
-                            error!("Unable to append new entry from '{}' to tree: {}", self.log.name, err);
+                        Err(_) => {
                             std::thread::sleep(std::time::Duration::from_secs(15));
                             continue 'outer;
                         }
                     }
                 }
+                let mut new_tree = tree_rx.recv().unwrap();
                 assert_eq!(processed_entries, sth.tree_size - tree_size);
-                assert_eq!(sth.tree_size, self.tree.tree_size());
-                let mth = match self.tree.root_hash() {
+                assert_eq!(sth.tree_size, new_tree.tree_size());
+                let mth = match new_tree.root_hash() {
                     Ok(v) => v,
                     Err(err) => {
                         error!("Unable to calculate MTH with new entries from '{}': {}", self.log.name, err);
@@ -103,8 +125,10 @@ impl<'a, S: CTLogStorage> CTWatcher<'a, S> {
                     continue;
                 }
 
-                match self.storage.save_tree(&self.log.id,self.tree.save()) {
-                    Ok(_) => {},
+                self.tree = new_tree;
+
+                match self.storage.save_tree(&self.log.id, self.tree.save()) {
+                    Ok(_) => {}
                     Err(err) => {
                         error!("Can't save state for '{}': {}", self.log.name, err);
                     }

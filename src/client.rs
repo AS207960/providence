@@ -376,8 +376,6 @@ pub struct GetEntries<'a> {
     size: u64,
     start_from: u64,
     offset: u64,
-    read: u64,
-    cache: std::collections::VecDeque<EntryJSON>,
 }
 
 impl<'a> GetEntries<'a> {
@@ -388,8 +386,6 @@ impl<'a> GetEntries<'a> {
             size,
             start_from: offset,
             offset: 0,
-            read: 0,
-            cache: std::collections::VecDeque::new(),
         }
     }
 
@@ -423,25 +419,15 @@ impl<'a> GetEntries<'a> {
 }
 
 impl std::iter::Iterator for GetEntries<'_> {
-    type Item = Result<Entry, String>;
+    type Item = Result<Vec<Entry>, String>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.read >= (self.size - self.start_from) {
-            return None;
-        }
-
-        if !self.cache.is_empty() {
-            let out = self.cache.pop_front().unwrap();
-            self.read += 1;
-            return Some(self.decode_entry(&out));
-        }
-
         let offset = self.offset + self.start_from;
         if offset >= self.size {
             return None;
         }
 
-        let mut entries = match match self.client.get(format!("{}ct/v1/get-entries", self.log.url))
+        let entries = match match self.client.get(format!("{}ct/v1/get-entries", self.log.url))
             .query(&[
                 ("start", offset.to_string()),
                 ("end", std::cmp::max(offset + 100, self.size-1).to_string())
@@ -472,11 +458,10 @@ impl std::iter::Iterator for GetEntries<'_> {
             info!("Downloaded {} of {} total '{}' entries ({:.2}%)", downloaded, to_download, self.log.name, download_percent);
         }
 
-        let out = self.decode_entry(&entries.entries.remove(0));
+        let remaining = self.size - self.offset;
+        let out = entries.entries.into_iter().take(remaining as usize)
+            .map(|e| self.decode_entry(&e)).collect::<Result<Vec<_>, _>>();
 
-        self.cache.append(&mut entries.entries.into_iter().collect::<std::collections::VecDeque<_>>());
-
-        self.read += 1;
         Some(out)
     }
 
