@@ -34,8 +34,7 @@ pub struct CompactMerkleTree {
     tree_size: u64,
     hashes: Vec<[u8; 32]>,
     min_tree_height: usize,
-    root_hash: Option<[u8; 32]>,
-    pool: threadpool::ThreadPool
+    root_hash: Option<[u8; 32]>
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -50,8 +49,7 @@ impl CompactMerkleTree {
             tree_size: 0,
             hashes: vec![],
             min_tree_height: 0,
-            root_hash: None,
-            pool: threadpool::ThreadPool::new(8)
+            root_hash: None
         }
     }
 
@@ -78,7 +76,7 @@ impl CompactMerkleTree {
         self.root_hash = None;
     }
 
-    fn hash_full(pool: threadpool::ThreadPool, leaves: Vec<Vec<u8>>) -> Result<([u8; 32], Vec<[u8; 32]>), String> {
+    fn hash_full(leaves: Vec<Vec<u8>>) -> Result<([u8; 32], Vec<[u8; 32]>), String> {
         let width = leaves.len();
         if width == 0 {
             Ok((compute_sha256_hash(&[])?, vec![]))
@@ -91,15 +89,13 @@ impl CompactMerkleTree {
             assert!(width as usize <= 2 * k);
             let (left_tx, left_rx) = std::sync::mpsc::channel();
             let (right_tx, right_rx) = std::sync::mpsc::channel();
-            let left_pool = pool.clone();
-            let right_pool = pool.clone();
             let left_leaves = leaves[0..k].to_vec();
             let right_leaves = leaves[k..].to_vec();
-            pool.execute(move || {
-                left_tx.send(Self::hash_full(left_pool, left_leaves)).unwrap();
+            std::thread::spawn(move || {
+                left_tx.send(Self::hash_full(left_leaves)).unwrap();
             });
-            pool.execute(move || {
-                right_tx.send(Self::hash_full(right_pool, right_leaves)).unwrap();
+            std::thread::spawn(move || {
+                right_tx.send(Self::hash_full(right_leaves)).unwrap();
             });
             let (left_root, mut left_hashes) = left_rx.recv().unwrap()?;
             let (right_root, mut right_hashes) = right_rx.recv().unwrap()?;
@@ -136,7 +132,7 @@ impl CompactMerkleTree {
         if self.min_tree_height > 0 && subtree_h > self.min_tree_height {
             return Err(format!("Subtree {} greater than current smallest subtree {}", subtree_h, self.min_tree_height));
         }
-        let (root_hash, hashes) = Self::hash_full(self.pool.clone(), leaves.to_vec())?;
+        let (root_hash, hashes) = Self::hash_full(leaves.to_vec())?;
         assert_eq!(hashes.len(), 1);
         self.push_subtree_hash(subtree_h, root_hash)?;
         Ok(())
@@ -204,7 +200,7 @@ impl CompactMerkleTree {
         }
         if idx < size {
             let hash_leaves = leaves[idx..].to_vec();
-            let (_root_hash, mut hashes) = Self::hash_full( self.pool.clone(), hash_leaves)?;
+            let (_root_hash, mut hashes) = Self::hash_full(hash_leaves)?;
             let mut new_hashes = self.hashes.clone();
             new_hashes.append(&mut hashes);
             self.update(final_size, new_hashes);

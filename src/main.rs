@@ -107,7 +107,7 @@ fn main() {
             let key = new_log.id.clone();
             let (sender, receiver) = std::sync::mpsc::channel();
             std::thread::spawn(move || {
-                let mut watcher = watcher::CTWatcher::new(c, new_log, &s, receiver);
+                let mut watcher = watcher::CTWatcher::new(c, new_log, s, receiver);
                 watcher.run()
             });
             log_watchers.insert(key, LogWatcherHandle {

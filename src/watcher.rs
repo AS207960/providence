@@ -4,16 +4,16 @@ pub trait CTLogStorage {
     fn save_tree(&self, log_id: &str, save: crate::tree::CompactMerkleTreeSave) -> Result<(), String>;
 }
 
-pub struct CTWatcher<'a, S: CTLogStorage> {
+pub struct CTWatcher<S: CTLogStorage> {
     client: reqwest::blocking::Client,
     log: crate::client::CTLog,
     tree: crate::tree::CompactMerkleTree,
-    storage: &'a S,
+    storage: S,
     cancel: std::sync::mpsc::Receiver<()>,
 }
 
-impl<'a, S: CTLogStorage> CTWatcher<'a, S> {
-    pub fn new(client: reqwest::blocking::Client, log: crate::client::CTLog, storage: &'a S, cancel: std::sync::mpsc::Receiver<()>) -> Self {
+impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
+    pub fn new(client: reqwest::blocking::Client, log: crate::client::CTLog, storage: S, cancel: std::sync::mpsc::Receiver<()>) -> Self {
         CTWatcher {
             client,
             log,
@@ -68,7 +68,10 @@ impl<'a, S: CTLogStorage> CTWatcher<'a, S> {
                 let (tree_tx, tree_rx) = std::sync::mpsc::channel();
                 let mut new_tree = self.tree.clone();
                 let log_name = self.log.name.clone();
+                let log_id = self.log.id.clone();
+                let storage = self.storage.clone();
                 std::thread::spawn(move || {
+                    let mut last_save = new_tree.tree_size();
                     loop {
                         let entries: Vec<_> = match entry_rx.recv() {
                             Ok(e) => e,
@@ -79,6 +82,17 @@ impl<'a, S: CTLogStorage> CTWatcher<'a, S> {
                             Err(err) => {
                                 error!("Unable to append new entry from '{}' to tree: {}", log_name, err);
                                 return;
+                            }
+                        }
+                        let new_size = new_tree.tree_size();
+                        if new_size - last_save > 1000 {
+                            match storage.save_tree(&log_id, new_tree.save()) {
+                                Ok(_) => {
+                                    last_save = new_size;
+                                }
+                                Err(err) => {
+                                    error!("Can't save state for '{}': {}", log_name, err);
+                                }
                             }
                         }
                     }
