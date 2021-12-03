@@ -428,11 +428,10 @@ impl std::iter::Iterator for GetEntries<'_> {
     type Item = Result<Vec<Entry>, String>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let to_download = self.size - self.start_from;
 
         let offset = std::cmp::max(self.offset + self.start_from, self.size-1);
 
-        if self.offset == to_download {
+        if offset == std::cmp::max(offset + 100, self.size-1) {
             return None
         }
 
@@ -463,6 +462,7 @@ impl std::iter::Iterator for GetEntries<'_> {
         }
 
         self.offset += returned_entries;
+        let to_download = self.size - self.start_from;
         let downloaded = self.offset;
 
         if downloaded % 100 == 0 || downloaded == to_download {
