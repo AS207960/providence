@@ -450,7 +450,7 @@ impl std::iter::Iterator for GetEntries<'_> {
         let entries = match r.json::<EntriesJSON>() {
             Ok(v) => v,
             Err(err) => {
-                info!("Failing '{}', response: {}", r.url(), r.text().unwrap_or_default());
+                info!("Failing on '{:?}'", err.url());
                 return Some(Err(format!("error decoding entries from '{}': {}", self.log.name, err)));
             }
         };
