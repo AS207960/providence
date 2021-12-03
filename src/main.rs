@@ -107,11 +107,11 @@ fn main() {
             let s = storage.clone();
             let key = new_log.id.clone();
             let (sender, receiver) = std::sync::mpsc::channel();
-            // std::thread::spawn(move || {
-            //     let mut watcher = watcher::CTWatcher::new(c, new_log, s, receiver);
-            //     watcher.run()
-            // });
             info!("Added log: {}", new_log.id);
+            std::thread::spawn(move || {
+                let mut watcher = watcher::CTWatcher::new(c, new_log, s, receiver);
+                watcher.run()
+            });
             log_watchers.insert(key, LogWatcherHandle {
                 cancel: sender
             });

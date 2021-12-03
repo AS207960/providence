@@ -57,10 +57,12 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    error!("Receiver disconnected");
                     panic!("Receiver disconnected");
                 }
             }
 
+            println!("{} {}", sth.tree_size, self.tree.tree_size());
             if sth.tree_size != self.tree.tree_size() {
                 let tree_size = self.tree.tree_size();
 
