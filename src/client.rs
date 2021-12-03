@@ -378,11 +378,11 @@ pub struct GetEntries<'a> {
     start_from: u64,
     offset: u64,
     last_offset: u64,
-    last_offset_time: DateTime<Utc>
+    pub last_offset_time: DateTime<Utc>
 }
 
 impl<'a> GetEntries<'a> {
-    pub fn new(client: &'a reqwest::blocking::Client, log: &'a CTLog, size: u64, offset: u64) -> Self {
+    pub fn new(client: &'a reqwest::blocking::Client, log: &'a CTLog, size: u64, offset: u64, last_offset_time: DateTime<Utc>) -> Self {
         GetEntries {
             client,
             log,
@@ -390,7 +390,7 @@ impl<'a> GetEntries<'a> {
             start_from: offset,
             offset: 0,
             last_offset: 0,
-            last_offset_time: Utc::now(),
+            last_offset_time,
         }
     }
 

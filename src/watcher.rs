@@ -1,3 +1,5 @@
+use chrono::prelude::*;
+
 pub trait CTLogStorage {
     fn find_save(&self, log_id: &str) -> Result<Option<crate::tree::CompactMerkleTreeSave>, String>;
 
@@ -49,6 +51,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
         };
 
         info!("Watching '{}'...", self.log.name);
+        let mut last_offset_time = Utc::now();
         'outer: loop {
             match self.cancel.try_recv() {
                 Ok(_) => {
@@ -100,11 +103,11 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                     Some(new_tree)
                 });
 
-                let entries_iter = crate::client::GetEntries::new(
-                    &self.client, &self.log, sth.tree_size, tree_size,
+                let mut entries_iter = crate::client::GetEntries::new(
+                    &self.client, &self.log, sth.tree_size, tree_size, last_offset_time,
                 );
                 let mut processed_entries: u64 = 0;
-                for entries in entries_iter {
+                for entries in &mut entries_iter {
                     let entries = match entries {
                         Ok(v) => v,
                         Err(err) => {
@@ -122,6 +125,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                         }
                     }
                 }
+                last_offset_time = entries_iter.last_offset_time;
                 // If we don't drop the sender here the thread will never exit
                 std::mem::drop(entry_tx);
                 let mut new_tree = match new_tree_h.join().unwrap() {
