@@ -159,9 +159,8 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                         error!("Can't save state for '{}': {}", self.log.name, err);
                     }
                 }
-            } else {
-                std::thread::sleep(std::time::Duration::from_secs(5));
             }
+            std::thread::sleep(std::time::Duration::from_secs(5));
             match crate::client::get_sth(&self.client, &self.log) {
                 Ok(new_sth) => {
                     sth = new_sth
