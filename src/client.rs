@@ -1,7 +1,7 @@
 use chrono::prelude::*;
 use std::convert::TryFrom;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CTLog {
     pub name: String,
     pub id: String,

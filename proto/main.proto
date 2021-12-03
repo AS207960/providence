@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package providence;
+import "google/protobuf/timestamp.proto";
+
+message RawEvent {
+  google.protobuf.Timestamp timestamp = 1;
+  oneof event {
+    X509Event x509_event = 2;
+  }
+}
+
+message X509Event {
+  uint64 index = 1;
+  bytes leaf = 2;
+  bytes extra_data = 3;
+  CTLog source = 4;
+  string url = 5;
+}
+
+message CTLog {
+  string name = 1;
+  string id = 2;
+  string url = 3;
+}

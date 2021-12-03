@@ -12,16 +12,21 @@ pub struct CTWatcher<S: CTLogStorage> {
     tree: crate::tree::CompactMerkleTree,
     storage: S,
     cancel: std::sync::mpsc::Receiver<()>,
+    evt_sender: std::sync::mpsc::Sender<crate::CTEvent>,
 }
 
 impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
-    pub fn new(client: reqwest::blocking::Client, log: crate::client::CTLog, storage: S, cancel: std::sync::mpsc::Receiver<()>) -> Self {
+    pub fn new(
+        client: reqwest::blocking::Client, log: crate::client::CTLog, storage: S,
+        cancel: std::sync::mpsc::Receiver<()>, evt_sender: std::sync::mpsc::Sender<crate::CTEvent>
+    ) -> Self {
         CTWatcher {
             client,
             log,
             tree: crate::tree::CompactMerkleTree::new(),
             storage,
             cancel,
+            evt_sender,
         }
     }
 
@@ -68,6 +73,13 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
             if sth.tree_size > self.tree.tree_size() {
                 info!("New STH for '{}': size {}", self.log.name, sth.tree_size);
                 let tree_size = self.tree.tree_size();
+
+                let should_emmit = (sth.tree_size - tree_size) < 1000;
+                let mut emmit_entries = Vec::with_capacity(if should_emmit {
+                    (sth.tree_size - tree_size) as usize
+                } else {
+                    0
+                });
 
                 let (entry_tx, entry_rx) = std::sync::mpsc::channel();
                 let mut new_tree = self.tree.clone();
@@ -117,6 +129,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                         }
                     };
                     processed_entries += entries.len() as u64;
+                    emmit_entries.extend(entries.iter().cloned());
                     match entry_tx.send(entries.into_iter().map(|e| e.leaf_bytes).collect::<Vec<Vec<u8>>>()) {
                         Ok(_) => {}
                         Err(_) => {
@@ -158,6 +171,15 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                     Ok(_) => {}
                     Err(err) => {
                         error!("Can't save state for '{}': {}", self.log.name, err);
+                    }
+                }
+
+                if should_emmit {
+                    for entry in emmit_entries {
+                        self.evt_sender.send(crate::CTEvent {
+                            entry,
+                            log: self.log.clone()
+                        }).expect("Unable to send evennt");
                     }
                 }
             }
