@@ -448,10 +448,11 @@ impl std::iter::Iterator for GetEntries<'_> {
             }
         };
         let url = r.url().to_string();
+        let status = r.status();
         let entries = match r.json::<EntriesJSON>() {
             Ok(v) => v,
             Err(err) => {
-                warn!("Failing on '{:?}'", url);
+                warn!("Failing on '{:?}': {}", url, status);
                 return Some(Err(format!("error decoding entries from '{}': {}", self.log.name, err)));
             }
         };
