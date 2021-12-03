@@ -430,13 +430,13 @@ impl std::iter::Iterator for GetEntries<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         let to_download = self.size - self.start_from;
 
-        let mut offset = std::cmp::max(self.offset + self.start_from, self.size-1);
+        let offset = std::cmp::max(self.offset + self.start_from, self.size-1);
 
         if self.offset == to_download {
             return None
         }
 
-        let entries = match match self.client.get(format!("{}ct/v1/get-entries", self.log.url))
+        let r = match self.client.get(format!("{}ct/v1/get-entries", self.log.url))
             .query(&[
                 ("start", offset.to_string()),
                 ("end", std::cmp::max(offset + 100, self.size-1).to_string())
@@ -446,9 +446,11 @@ impl std::iter::Iterator for GetEntries<'_> {
             Err(err) => {
                 return Some(Err(format!("error connecting to '{}' to get entries: {}", self.log.name, err)));
             }
-        }.json::<EntriesJSON>() {
+        };
+        let entries = match r.json::<EntriesJSON>() {
             Ok(v) => v,
             Err(err) => {
+                info!("Failing '{}', response: {}", r.url(), r.text().unwrap_or_default());
                 return Some(Err(format!("error decoding entries from '{}': {}", self.log.name, err)));
             }
         };
