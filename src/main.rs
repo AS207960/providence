@@ -93,6 +93,7 @@ fn main() {
             .map(|k| k.to_owned()).collect::<Vec<_>>();
 
         for removed_log in removed_logs {
+            info!("Removing log {}", removed_log);
             let handle = log_watchers.get(&removed_log).unwrap();
             handle.cancel.send(()).unwrap();
             log_watchers.remove(&removed_log);
@@ -106,15 +107,16 @@ fn main() {
             let s = storage.clone();
             let key = new_log.id.clone();
             let (sender, receiver) = std::sync::mpsc::channel();
-            std::thread::spawn(move || {
-                let mut watcher = watcher::CTWatcher::new(c, new_log, s, receiver);
-                watcher.run()
-            });
+            // std::thread::spawn(move || {
+            //     let mut watcher = watcher::CTWatcher::new(c, new_log, s, receiver);
+            //     watcher.run()
+            // });
+            info!("Added log: {}", new_log.id);
             log_watchers.insert(key, LogWatcherHandle {
                 cancel: sender
             });
         }
 
-        std::thread::sleep(std::time::Duration::from_secs(3600));
+        std::thread::sleep(std::time::Duration::from_secs(5));
     }
 }

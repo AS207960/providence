@@ -156,6 +156,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
             }
             match crate::client::get_sth(&self.client, &self.log) {
                 Ok(new_sth) => {
+                    info!("New STH for '{}': size {}", self.log.name, new_sth.tree_size);
                     sth = new_sth
                 }
                 Err(err) => {
