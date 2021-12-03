@@ -122,6 +122,8 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                         }
                     }
                 }
+                // If we don't drop the sender here the thread will never exit
+                std::mem::drop(entry_tx);
                 let mut new_tree = match new_tree_h.join().unwrap() {
                     Some(v) => v,
                     None => {
