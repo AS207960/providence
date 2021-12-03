@@ -428,13 +428,11 @@ impl std::iter::Iterator for GetEntries<'_> {
     type Item = Result<Vec<Entry>, String>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut offset = self.offset + self.start_from;
-        if offset == self.size {
+        let mut offset = std::cmp::max(self.offset + self.start_from, self.size-1);
+        if offset == (self.size-1) {
             return None;
-        } else {
-            offset = std::cmp::max(offset, self.size-1);
         }
-
+        
         let entries = match match self.client.get(format!("{}ct/v1/get-entries", self.log.url))
             .query(&[
                 ("start", offset.to_string()),
