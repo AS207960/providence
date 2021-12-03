@@ -447,10 +447,11 @@ impl std::iter::Iterator for GetEntries<'_> {
                 return Some(Err(format!("error connecting to '{}' to get entries: {}", self.log.name, err)));
             }
         };
+        let url = r.url().as_str();
         let entries = match r.json::<EntriesJSON>() {
             Ok(v) => v,
             Err(err) => {
-                info!("Failing on '{:?}'", err.url());
+                info!("Failing on '{:?}'", url);
                 return Some(Err(format!("error decoding entries from '{}': {}", self.log.name, err)));
             }
         };
