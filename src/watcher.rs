@@ -62,8 +62,8 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                 }
             }
 
-            println!("{} {}", sth.tree_size, self.tree.tree_size());
             if sth.tree_size != self.tree.tree_size() {
+                info!("New STH for '{}': size {}", self.log.name, new_sth.tree_size);
                 let tree_size = self.tree.tree_size();
 
                 let (entry_tx, entry_rx) = std::sync::mpsc::channel();
@@ -160,7 +160,6 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
             }
             match crate::client::get_sth(&self.client, &self.log) {
                 Ok(new_sth) => {
-                    info!("New STH for '{}': size {}", self.log.name, new_sth.tree_size);
                     sth = new_sth
                 }
                 Err(err) => {
