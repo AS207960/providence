@@ -432,7 +432,7 @@ impl std::iter::Iterator for GetEntries<'_> {
 
         let offset = std::cmp::max(self.offset + self.start_from, self.size-1);
 
-        if self.offset == (to_download-1) {
+        if offset == std::cmp::max(offset + 100, self.size-1) {
             return None
         }
 
