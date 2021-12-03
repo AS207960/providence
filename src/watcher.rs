@@ -136,6 +136,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                 };
                 assert_eq!(processed_entries, sth.tree_size - tree_size);
                 assert_eq!(sth.tree_size, new_tree.tree_size());
+                info!("Up to date on '{}'", self.log.name);
                 let mth = match new_tree.root_hash() {
                     Ok(v) => v,
                     Err(err) => {
