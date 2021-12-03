@@ -430,7 +430,7 @@ impl std::iter::Iterator for GetEntries<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         let offset = std::cmp::min(self.offset + self.start_from, self.size-1);
 
-        if offset == self.size-1 {
+        if (self.offset + self.start_from) >= self.size {
             return None
         }
 
