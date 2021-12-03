@@ -63,7 +63,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
             }
 
             if sth.tree_size != self.tree.tree_size() {
-                info!("New STH for '{}': size {}", self.log.name, new_sth.tree_size);
+                info!("New STH for '{}': size {}", self.log.name, sth.tree_size);
                 let tree_size = self.tree.tree_size();
 
                 let (entry_tx, entry_rx) = std::sync::mpsc::channel();
