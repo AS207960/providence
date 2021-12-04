@@ -82,7 +82,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                 });
                 info!("New STH for '{}'; size {}; emmiting: {}", self.log.name, sth.tree_size, should_emmit);
 
-                let (entry_tx, entry_rx) = std::sync::mpsc::channel();
+                let (entry_tx, entry_rx) = std::sync::mpsc::sync_channel(100);
                 let mut new_tree = self.tree.clone();
                 let log_name = self.log.name.clone();
                 let log_id = self.log.id.clone();
@@ -182,7 +182,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                         self.evt_sender.send(crate::CTEvent {
                             entry,
                             log: self.log.clone()
-                        }).expect("Unable to send evennt");
+                        }).expect("Unable to send event");
                     }
                 } else {
                     std::mem::drop(emmit_entries);
