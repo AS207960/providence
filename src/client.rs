@@ -222,7 +222,7 @@ struct PreCertHeader {
 }
 
 #[derive(Debug, Clone)]
-pub struct PreCert {
+    pub struct PreCert {
     pub issuer_key_hash: [u8; 32],
     pub tbs_certificate: Vec<u8>,
 }

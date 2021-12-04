@@ -135,7 +135,7 @@ fn main() {
                 let evt_tx = event_tx.clone();
                 std::thread::spawn(move || {
                     let mut watcher = watcher::CTWatcher::new(
-                        c, new_log, s, receiver, evt_tx
+                        c, new_log, s, receiver, evt_tx,
                     );
                     watcher.run()
                 });
@@ -163,31 +163,45 @@ fn main() {
     ).expect("Unable to declare RabbitMQ exchange");
 
     for evt in event_rx.iter() {
-        let proto_evt = proto::RawEvent {
-            timestamp: chrono_to_proto(Some(Utc::now())),
-            event: Some(proto::raw_event::Event::X509Event(proto::X509Event {
-                index: evt.entry.index,
-                leaf: evt.entry.leaf_bytes,
-                extra_data: evt.entry.extra_data,
-                url: format!("{}ct/v1/get-entries?start={}&end={}", evt.log.url, evt.entry.index, evt.entry.index),
-                source: Some(proto::CtLog {
-                    name: evt.log.name,
-                    id: evt.log.id,
-                    url: evt.log.url,
-                }),
-            }))
-        };
+        if let Some(leaf) = evt.entry.tree_leaf {
+            let proto_evt = proto::RawEvent {
+                timestamp: chrono_to_proto(Some(Utc::now())),
+                event: Some(proto::raw_event::Event::LeafEvent(proto::LeafEvent {
+                    index: evt.entry.index,
+                    extra_data: evt.entry.extra_data,
+                    url: format!("{}ct/v1/get-entries?start={}&end={}", evt.log.url, evt.entry.index, evt.entry.index),
+                    source: Some(proto::CtLog {
+                        name: evt.log.name,
+                        id: evt.log.id,
+                        url: evt.log.url,
+                    }),
+                    entry: match leaf.leaf {
+                        client::MerkleTreeLeafValue::TimestampedEntry(te) => Some(proto::leaf_event::Entry::TimestampedEntry(proto::TimestampedEntry {
+                            timestamp: chrono_to_proto(Some(te.timestamp)),
+                            extensions: te.extensions.0,
+                            entry: Some(match te.entry {
+                                client::LogEntry::X509Entry(asn1) => proto::timestamped_entry::Entry::Asn1Cert(asn1.0),
+                                client::LogEntry::PreCert(pre_cert) => proto::timestamped_entry::Entry::PreCert(proto::PreCert {
+                                    issuer_key_hash: pre_cert.issuer_key_hash.to_vec(),
+                                    tbs_certificate: pre_cert.tbs_certificate,
+                                })
+                            }),
+                        }))
+                    },
+                })),
+            };
 
-        let mut buf = Vec::new();
-        buf.reserve(proto_evt.encoded_len());
-        proto_evt.encode(&mut buf).unwrap();
+            let mut buf = Vec::new();
+            buf.reserve(proto_evt.encoded_len());
+            proto_evt.encode(&mut buf).unwrap();
 
-        pub_exchange.publish(amiquip::Publish {
-            body: &buf,
-            routing_key: "".to_string(),
-            immediate: false,
-            mandatory: false,
-            properties: amiquip::AmqpProperties::default(),
-        }).expect("Unable to publish message");
+            pub_exchange.publish(amiquip::Publish {
+                body: &buf,
+                routing_key: "".to_string(),
+                immediate: false,
+                mandatory: false,
+                properties: amiquip::AmqpProperties::default(),
+            }).expect("Unable to publish message");
+        }
     }
 }

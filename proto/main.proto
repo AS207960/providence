@@ -6,20 +6,36 @@ import "google/protobuf/timestamp.proto";
 message RawEvent {
   google.protobuf.Timestamp timestamp = 1;
   oneof event {
-    X509Event x509_event = 2;
+    LeafEvent leaf_event = 2;
   }
 }
 
-message X509Event {
+message LeafEvent {
   uint64 index = 1;
-  bytes leaf = 2;
-  bytes extra_data = 3;
-  CTLog source = 4;
-  string url = 5;
+  bytes extra_data = 2;
+  CTLog source = 3;
+  string url = 4;
+  oneof entry {
+    TimestampedEntry timestamped_entry = 5;
+  }
 }
 
 message CTLog {
   string name = 1;
   string id = 2;
   string url = 3;
+}
+
+message TimestampedEntry {
+  google.protobuf.Timestamp timestamp = 1;
+  bytes extensions = 2;
+  oneof entry {
+    bytes asn1_cert = 3;
+    PreCert pre_cert = 4;
+  }
+}
+
+message PreCert {
+  bytes issuer_key_hash = 1;
+  bytes tbs_certificate = 2;
 }
