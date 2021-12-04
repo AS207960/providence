@@ -72,7 +72,6 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
             }
 
             if sth.tree_size > self.tree.tree_size() {
-                info!("New STH for '{}': size {}", self.log.name, sth.tree_size);
                 let tree_size = self.tree.tree_size();
 
                 let should_emmit = (sth.tree_size - tree_size) < 1000;
@@ -81,6 +80,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                 } else {
                     0
                 });
+                info!("New STH for '{}'; size {}; emmiting: {}", self.log.name, sth.tree_size, should_emmit);
 
                 let (entry_tx, entry_rx) = std::sync::mpsc::channel();
                 let mut new_tree = self.tree.clone();
@@ -130,7 +130,9 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                         }
                     };
                     processed_entries += entries.len() as u64;
-                    emmit_entries.extend(entries.iter().cloned());
+                    if should_emmit {
+                      emmit_entries.extend(entries.iter().cloned());
+                    }
                     match entry_tx.send(entries.into_iter().map(|e| e.leaf_bytes).collect::<Vec<Vec<u8>>>()) {
                         Ok(_) => {}
                         Err(_) => {
