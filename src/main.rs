@@ -95,7 +95,7 @@ fn main() {
         root: file_root
     };
 
-    let (event_tx, event_rx) = std::sync::mpsc::channel::<CTEvent>();
+    let (event_tx, event_rx) = std::sync::mpsc::sync_channel::<CTEvent>(1000);
 
     std::thread::spawn(move || {
         let mut log_watchers = std::collections::HashMap::<String, LogWatcherHandle>::new();

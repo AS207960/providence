@@ -12,13 +12,14 @@ pub struct CTWatcher<S: CTLogStorage> {
     tree: crate::tree::CompactMerkleTree,
     storage: S,
     cancel: std::sync::mpsc::Receiver<()>,
-    evt_sender: std::sync::mpsc::Sender<crate::CTEvent>,
+    evt_sender: std::sync::mpsc::SyncSender<crate::CTEvent>,
 }
 
 impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
     pub fn new(
         client: reqwest::blocking::Client, log: crate::client::CTLog, storage: S,
-        cancel: std::sync::mpsc::Receiver<()>, evt_sender: std::sync::mpsc::Sender<crate::CTEvent>
+        cancel: std::sync::mpsc::Receiver<()>,
+        evt_sender: std::sync::mpsc::SyncSender<crate::CTEvent>
     ) -> Self {
         CTWatcher {
             client,
@@ -181,6 +182,8 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                             log: self.log.clone()
                         }).expect("Unable to send evennt");
                     }
+                } else {
+                    std::mem::drop(emmit_entries);
                 }
             }
             std::thread::sleep(std::time::Duration::from_secs(5));
