@@ -173,10 +173,13 @@ struct TreeHeadSignature {
 }
 
 #[derive(Debug, Clone)]
-pub struct ASN1Cert(pub Vec<u8>);
+pub struct ASN1Cert {
+    pub leaf_certificate: Vec<u8>,
+    pub certificate_chain: Vec<Vec<u8>>,
+}
 
 impl ASN1Cert {
-    fn from_bytes(p: &mut Vec<u8>) -> Option<Self> {
+    fn from_bytes(p: &mut Vec<u8>, extra_data: &mut Vec<u8>) -> Option<Self> {
         if p.len() < 3 {
             return None;
         };
@@ -190,7 +193,33 @@ impl ASN1Cert {
         };
 
         let data = p.drain(..len).collect::<Vec<u8>>();
-        Some(Self(data))
+
+        let certificate_chain_len_bytes = extra_data.drain(..3).collect::<Vec<u8>>();
+        let mut certificate_chain_len_bytes_u32 = vec![0];
+        certificate_chain_len_bytes_u32.extend(certificate_chain_len_bytes);
+        let certificate_chain_len = u8_slice_as_any::<simple_endian::u32be>(&certificate_chain_len_bytes_u32)?.to_native() as usize;
+        if extra_data.len() < certificate_chain_len {
+            return None;
+        };
+        let mut certificate_chain_bytes = extra_data.drain(..certificate_chain_len).collect::<Vec<u8>>();
+        let mut certificate_chain = vec![];
+
+        while !certificate_chain_bytes.is_empty() {
+            let certificate_len_bytes = certificate_chain_bytes.drain(..3).collect::<Vec<u8>>();
+            let mut certificate_len_bytes_u32 = vec![0];
+            certificate_len_bytes_u32.extend(certificate_len_bytes);
+            let certificate_len = u8_slice_as_any::<simple_endian::u32be>(&certificate_len_bytes_u32)?.to_native() as usize;
+            if certificate_chain_bytes.len() < certificate_len {
+                return None;
+            };
+            let certificate_bytes = certificate_chain_bytes.drain(..certificate_len).collect::<Vec<u8>>();
+            certificate_chain.push(certificate_bytes);
+        }
+
+        Some(Self {
+            leaf_certificate: data,
+            certificate_chain,
+        })
     }
 }
 
@@ -225,10 +254,12 @@ struct PreCertHeader {
     pub struct PreCert {
     pub issuer_key_hash: [u8; 32],
     pub tbs_certificate: Vec<u8>,
+    pub leaf_certificate: Vec<u8>,
+    pub certificate_chain: Vec<Vec<u8>>,
 }
 
 impl PreCert {
-    fn from_bytes(p: &mut Vec<u8>) -> Option<Self> {
+    fn from_bytes(p: &mut Vec<u8>, extra_data: &mut Vec<u8>) -> Option<Self> {
         let h_len = std::mem::size_of::<PreCertHeader>();
         if p.len() < h_len {
             return None;
@@ -242,12 +273,44 @@ impl PreCert {
         if p.len() < tbs_certificate_len {
             return None;
         };
-
         let data = p.drain(..tbs_certificate_len).collect::<Vec<u8>>();
+
+        let leaf_certificate_len_bytes = extra_data.drain(..3).collect::<Vec<u8>>();
+        let mut leaf_certificate_len_bytes_u32 = vec![0];
+        leaf_certificate_len_bytes_u32.extend(leaf_certificate_len_bytes);
+        let leaf_certificate_len = u8_slice_as_any::<simple_endian::u32be>(&leaf_certificate_len_bytes_u32)?.to_native() as usize;
+        if extra_data.len() < leaf_certificate_len {
+            return None;
+        };
+        let leaf_certificate = extra_data.drain(..leaf_certificate_len).collect::<Vec<u8>>();
+
+        let certificate_chain_len_bytes = extra_data.drain(..3).collect::<Vec<u8>>();
+        let mut certificate_chain_len_bytes_u32 = vec![0];
+        certificate_chain_len_bytes_u32.extend(certificate_chain_len_bytes);
+        let certificate_chain_len = u8_slice_as_any::<simple_endian::u32be>(&certificate_chain_len_bytes_u32)?.to_native() as usize;
+        if extra_data.len() < certificate_chain_len {
+            return None;
+        };
+        let mut certificate_chain_bytes = extra_data.drain(..certificate_chain_len).collect::<Vec<u8>>();
+        let mut certificate_chain = vec![];
+
+        while !certificate_chain_bytes.is_empty() {
+            let certificate_len_bytes = certificate_chain_bytes.drain(..3).collect::<Vec<u8>>();
+            let mut certificate_len_bytes_u32 = vec![0];
+            certificate_len_bytes_u32.extend(certificate_len_bytes);
+            let certificate_len = u8_slice_as_any::<simple_endian::u32be>(&certificate_len_bytes_u32)?.to_native() as usize;
+            if certificate_chain_bytes.len() < certificate_len {
+                return None;
+            };
+            let certificate_bytes = certificate_chain_bytes.drain(..certificate_len).collect::<Vec<u8>>();
+            certificate_chain.push(certificate_bytes);
+        }
 
         Some(Self {
             issuer_key_hash: header.issuer_key_hash,
             tbs_certificate: data,
+            leaf_certificate,
+            certificate_chain,
         })
     }
 }
@@ -281,7 +344,7 @@ pub struct TimestampedEntry {
 }
 
 impl TimestampedEntry {
-    fn from_bytes(p: &mut Vec<u8>) -> Option<Self> {
+    fn from_bytes(p: &mut Vec<u8>, extra_data: &mut Vec<u8>) -> Option<Self> {
         let h_len = std::mem::size_of::<TimestampedEntryHeader>();
         if p.len() < h_len {
             return None;
@@ -291,11 +354,11 @@ impl TimestampedEntry {
 
         let entry = match header.entry_type {
             LogEntryType::X509Entry => {
-                let cert = ASN1Cert::from_bytes(p)?;
+                let cert = ASN1Cert::from_bytes(p, extra_data)?;
                 LogEntry::X509Entry(cert)
             }
             LogEntryType::PreCertEntry => {
-                let pre_cert = PreCert::from_bytes(p)?;
+                let pre_cert = PreCert::from_bytes(p, extra_data)?;
                 LogEntry::PreCert(pre_cert)
             }
         };
@@ -336,7 +399,7 @@ pub struct MerkleTreeLeaf {
 }
 
 impl MerkleTreeLeaf {
-    fn from_bytes(p: &mut Vec<u8>) -> Option<Self> {
+    fn from_bytes(p: &mut Vec<u8>, extra_data: &mut Vec<u8>) -> Option<Self> {
         let h_len = std::mem::size_of::<MerkleTreeLeafHeader>();
         if p.len() < h_len {
             return None;
@@ -350,7 +413,7 @@ impl MerkleTreeLeaf {
 
         let leaf = match header.leaf_type {
             MerkleLeafType::TimestampedEntry => {
-                let entry = TimestampedEntry::from_bytes(p)?;
+                let entry = TimestampedEntry::from_bytes(p, extra_data)?;
                 MerkleTreeLeafValue::TimestampedEntry(entry)
             }
         };
@@ -409,12 +472,15 @@ impl<'a> GetEntries<'a> {
         };
 
         let mut decode_buf = merkle_leaf_bytes.clone();
-        let merkle_leaf = MerkleTreeLeaf::from_bytes(&mut decode_buf);
+        let mut decode_extra_data_buf = extra_bytes.clone();
+        let merkle_leaf = MerkleTreeLeaf::from_bytes(&mut decode_buf, &mut decode_extra_data_buf);
 
-        if decode_buf.len() != 0 {
+        if merkle_leaf.is_none() {
+            warn!("Unable to decode entry {} from '{}'", self.log.name, index);
+        } else if decode_buf.len() != 0 {
             return Err(format!("Left over bytes on merkle leaf from '{}'", self.log.name));
         }
-
+        
         Ok(Entry {
             index,
             tree_leaf: merkle_leaf,

@@ -168,7 +168,6 @@ fn main() {
                 timestamp: chrono_to_proto(Some(Utc::now())),
                 event: Some(proto::raw_event::Event::LeafEvent(proto::LeafEvent {
                     index: evt.entry.index,
-                    extra_data: evt.entry.extra_data,
                     url: format!("{}ct/v1/get-entries?start={}&end={}", evt.log.url, evt.entry.index, evt.entry.index),
                     source: Some(proto::CtLog {
                         name: evt.log.name,
@@ -180,10 +179,15 @@ fn main() {
                             timestamp: chrono_to_proto(Some(te.timestamp)),
                             extensions: te.extensions.0,
                             entry: Some(match te.entry {
-                                client::LogEntry::X509Entry(asn1) => proto::timestamped_entry::Entry::Asn1Cert(asn1.0),
+                                client::LogEntry::X509Entry(asn1) => proto::timestamped_entry::Entry::Asn1Cert(proto::Asn1Cert {
+                                    leaf_certificate: asn1.leaf_certificate,
+                                    certificate_chain: asn1.certificate_chain,
+                                }),
                                 client::LogEntry::PreCert(pre_cert) => proto::timestamped_entry::Entry::PreCert(proto::PreCert {
                                     issuer_key_hash: pre_cert.issuer_key_hash.to_vec(),
                                     tbs_certificate: pre_cert.tbs_certificate,
+                                    leaf_certificate: pre_cert.leaf_certificate,
+                                    certificate_chain: pre_cert.certificate_chain,
                                 })
                             }),
                         }))

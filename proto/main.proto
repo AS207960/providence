@@ -12,11 +12,10 @@ message RawEvent {
 
 message LeafEvent {
   uint64 index = 1;
-  bytes extra_data = 2;
-  CTLog source = 3;
-  string url = 4;
+  CTLog source = 2;
+  string url = 3;
   oneof entry {
-    TimestampedEntry timestamped_entry = 5;
+    TimestampedEntry timestamped_entry = 4;
   }
 }
 
@@ -30,12 +29,19 @@ message TimestampedEntry {
   google.protobuf.Timestamp timestamp = 1;
   bytes extensions = 2;
   oneof entry {
-    bytes asn1_cert = 3;
+    ASN1Cert asn1_cert = 3;
     PreCert pre_cert = 4;
   }
+}
+
+message ASN1Cert {
+  bytes leaf_certificate = 1;
+  repeated bytes certificate_chain = 2;
 }
 
 message PreCert {
   bytes issuer_key_hash = 1;
   bytes tbs_certificate = 2;
+  bytes leaf_certificate = 3;
+  repeated bytes certificate_chain = 4;
 }
