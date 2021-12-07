@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package providence;
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
 
 message RawEvent {
   google.protobuf.Timestamp timestamp = 1;
@@ -44,4 +45,121 @@ message PreCert {
   bytes tbs_certificate = 2;
   bytes leaf_certificate = 3;
   repeated bytes certificate_chain = 4;
+}
+
+message ParsedEvent {
+  oneof event {
+    Certificate cert = 1;
+  }
+}
+
+message Certificate {
+    uint64 cert_index = 1;
+    string cert_url = 2;
+    google.protobuf.Timestamp seen = 3;
+    google.protobuf.Timestamp timestamp = 4;
+    CertificateSource source = 5;
+    bool pre_cert = 6;
+    bool certs_consistent = 7;
+    LeafCertificate leaf_cert = 8;
+    repeated LeafCertificate chain = 9;
+}
+
+message CertificateSource {
+   string name = 1;
+   string id = 2;
+   string url = 3;
+}
+
+message LeafCertificate {
+  bytes serial_number = 1;
+  google.protobuf.Timestamp not_before = 2;
+  google.protobuf.Timestamp not_after = 3;
+  string subject = 4;
+  string issuer = 5;
+  CertExtensions extensions = 6;
+  bytes raw = 7;
+}
+
+message CertExtensions {
+   BasicConstraints basic_constraints = 1;
+   KeyUsage key_usage = 2;
+   ExtendedKeyUsage extended_key_usage = 3;
+   SubjectKeyIdentifier subject_key_identifier = 4;
+   SubjectAlternativeNames subject_alternative_names = 5;
+   AuthorityKeyIdentifier authority_key_identifier = 6;
+   AuthorityInfoAccess authority_info_access = 7;
+}
+
+message BasicConstraints {
+    bool critical = 1;
+    bool ca = 2;
+    google.protobuf.UInt32Value path_len_constraint = 3;
+}
+
+message KeyUsage {
+    bool critical = 1;
+    bool digital_signature = 2;
+    bool non_repudiation = 3;
+    bool key_encipherment = 4;
+    bool data_encipherment = 5;
+    bool key_agreement = 6;
+    bool key_cert_sign = 7;
+    bool crl_sign = 8;
+    bool encipher_only = 9;
+    bool decipher_only = 10;
+}
+
+message ExtendedKeyUsage {
+    bool critical = 1;
+    bool any = 2;
+    bool server_auth = 3;
+    bool client_auth = 4;
+    bool code_signing = 5;
+    bool email_protection = 6;
+    bool time_stamping = 7;
+    bool ocsp_stapling = 8;
+    repeated string other = 9;
+}
+
+message AuthorityKeyIdentifier {
+    bool critical = 1;
+    google.protobuf.BytesValue ki = 2;
+    google.protobuf.BytesValue serial = 3;
+}
+
+message SubjectKeyIdentifier {
+    bool critical = 1;
+    bytes ki = 2;
+}
+
+message SubjectAlternativeNames {
+    bool critical = 1;
+    repeated Name names = 2;
+}
+
+message AuthorityInfoAccess {
+    bool critical = 1;
+    repeated Name ocsp = 2;
+    repeated Name ca_repository = 3;
+    repeated Name ca_issuers = 4;
+    repeated Name crls = 5;
+}
+
+message Name {
+  oneof value {
+    string email = 1;
+    string dns = 2;
+    string uri = 3;
+    string name = 4;
+    string oid = 5;
+    IPAddr ip_address = 6;
+  }
+}
+
+message IPAddr {
+  oneof ip_addr {
+      fixed32 v4 = 1;
+      bytes v6 = 2;
+  }
 }

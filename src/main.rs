@@ -1,7 +1,9 @@
 #[macro_use]
 extern crate serde_derive;
 #[macro_use]
-extern crate log;
+extern crate rocket;
+#[macro_use]
+extern crate lazy_static;
 
 use chrono::prelude::*;
 use prost::Message;
@@ -10,6 +12,7 @@ mod tree;
 mod client;
 mod watcher;
 mod log_list;
+mod api;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -81,6 +84,8 @@ pub struct CTEvent {
 fn main() {
     pretty_env_logger::init();
 
+    let rt = tokio::runtime::Runtime::new().expect("Unable to create Tokio runtime");
+
     let mut client_headers = reqwest::header::HeaderMap::new();
     client_headers.insert("Accept", reqwest::header::HeaderValue::from_static("application/json"));
     let client = reqwest::blocking::Client::builder()
@@ -121,6 +126,7 @@ fn main() {
                 let handle = log_watchers.get(&removed_log).unwrap();
                 handle.cancel.send(()).unwrap();
                 log_watchers.remove(&removed_log);
+                api::LOG_STATS.lock().unwrap().remove(&removed_log);
             }
 
             let new_logs = logs.into_iter()
@@ -131,6 +137,7 @@ fn main() {
                 let s = storage.clone();
                 let key = new_log.id.clone();
                 let (sender, receiver) = std::sync::mpsc::channel();
+                api::LOG_STATS.lock().unwrap().insert(key.clone(), api::Log::from_client_log(&new_log));
                 info!("Added log: {}", new_log.id);
                 let evt_tx = event_tx.clone();
                 std::thread::spawn(move || {
@@ -148,64 +155,70 @@ fn main() {
         }
     });
 
-    info!("Starting RabbitMQ listener");
+    info!("Starting RabbitMQ client");
     let mut amqp_conn = amiquip::Connection::insecure_open(&std::env::var("RABBITMQ_URL").expect("No RABBITMQ_URL variable"))
         .expect("Unable to connect to RabbitMQ server");
     let amqp_channel = amqp_conn.open_channel(None).expect("Unable to open RabbitMQ channel");
 
-    let pub_exchange = amqp_channel.exchange_declare(
-        amiquip::ExchangeType::Fanout,
-        "providence_raw",
-        amiquip::ExchangeDeclareOptions {
-            durable: true,
-            ..amiquip::ExchangeDeclareOptions::default()
-        },
-    ).expect("Unable to declare RabbitMQ exchange");
+    std::thread::spawn(move || {
+        let pub_exchange = amqp_channel.exchange_declare(
+            amiquip::ExchangeType::Fanout,
+            "providence_raw",
+            amiquip::ExchangeDeclareOptions {
+                durable: true,
+                ..amiquip::ExchangeDeclareOptions::default()
+            },
+        ).expect("Unable to declare RabbitMQ exchange");
 
-    for evt in event_rx.iter() {
-        if let Some(leaf) = evt.entry.tree_leaf {
-            let proto_evt = proto::RawEvent {
-                timestamp: chrono_to_proto(Some(Utc::now())),
-                event: Some(proto::raw_event::Event::LeafEvent(proto::LeafEvent {
-                    index: evt.entry.index,
-                    url: format!("{}ct/v1/get-entries?start={}&end={}", evt.log.url, evt.entry.index, evt.entry.index),
-                    source: Some(proto::CtLog {
-                        name: evt.log.name,
-                        id: evt.log.id,
-                        url: evt.log.url,
-                    }),
-                    entry: match leaf.leaf {
-                        client::MerkleTreeLeafValue::TimestampedEntry(te) => Some(proto::leaf_event::Entry::TimestampedEntry(proto::TimestampedEntry {
-                            timestamp: chrono_to_proto(Some(te.timestamp)),
-                            extensions: te.extensions.0,
-                            entry: Some(match te.entry {
-                                client::LogEntry::X509Entry(asn1) => proto::timestamped_entry::Entry::Asn1Cert(proto::Asn1Cert {
-                                    leaf_certificate: asn1.leaf_certificate,
-                                    certificate_chain: asn1.certificate_chain,
+        for evt in event_rx.iter() {
+            if let Some(leaf) = evt.entry.tree_leaf {
+                let proto_evt = proto::RawEvent {
+                    timestamp: chrono_to_proto(Some(Utc::now())),
+                    event: Some(proto::raw_event::Event::LeafEvent(proto::LeafEvent {
+                        index: evt.entry.index,
+                        url: format!("{}ct/v1/get-entries?start={}&end={}", evt.log.url, evt.entry.index, evt.entry.index),
+                        source: Some(proto::CtLog {
+                            name: evt.log.name,
+                            id: evt.log.id,
+                            url: evt.log.url,
+                        }),
+                        entry: match leaf.leaf {
+                            client::MerkleTreeLeafValue::TimestampedEntry(te) => Some(proto::leaf_event::Entry::TimestampedEntry(proto::TimestampedEntry {
+                                timestamp: chrono_to_proto(Some(te.timestamp)),
+                                extensions: te.extensions.0,
+                                entry: Some(match te.entry {
+                                    client::LogEntry::X509Entry(asn1) => proto::timestamped_entry::Entry::Asn1Cert(proto::Asn1Cert {
+                                        leaf_certificate: asn1.leaf_certificate,
+                                        certificate_chain: asn1.certificate_chain,
+                                    }),
+                                    client::LogEntry::PreCert(pre_cert) => proto::timestamped_entry::Entry::PreCert(proto::PreCert {
+                                        issuer_key_hash: pre_cert.issuer_key_hash.to_vec(),
+                                        tbs_certificate: pre_cert.tbs_certificate,
+                                        leaf_certificate: pre_cert.leaf_certificate,
+                                        certificate_chain: pre_cert.certificate_chain,
+                                    })
                                 }),
-                                client::LogEntry::PreCert(pre_cert) => proto::timestamped_entry::Entry::PreCert(proto::PreCert {
-                                    issuer_key_hash: pre_cert.issuer_key_hash.to_vec(),
-                                    tbs_certificate: pre_cert.tbs_certificate,
-                                    leaf_certificate: pre_cert.leaf_certificate,
-                                    certificate_chain: pre_cert.certificate_chain,
-                                })
-                            }),
-                        }))
-                    },
-                })),
-            };
+                            }))
+                        },
+                    })),
+                };
 
-            let mut buf = Vec::new();
-            buf.reserve(proto_evt.encoded_len());
-            proto_evt.encode(&mut buf).unwrap();
+                let mut buf = Vec::new();
+                buf.reserve(proto_evt.encoded_len());
+                proto_evt.encode(&mut buf).unwrap();
 
-            pub_exchange.publish(amiquip::Publish {
-                body: &buf,
-                routing_key: "".to_string(),
-                immediate: false,
-                mandatory: false,
-                properties: amiquip::AmqpProperties::default(),
-            }).expect("Unable to publish message");
+                pub_exchange.publish(amiquip::Publish {
+                    body: &buf,
+                    routing_key: "".to_string(),
+                    immediate: false,
+                    mandatory: false,
+                    properties: amiquip::AmqpProperties::default(),
+                }).expect("Unable to publish message");
+            }
         }
-    }
+    });
+
+    rt.block_on(async {
+        api::main().await;
+    });
 }

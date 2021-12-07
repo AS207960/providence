@@ -19,23 +19,27 @@ impl std::default::Default for LogType {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct TemporalInterval {
     start_inclusive: DateTime<Utc>,
     end_exclusive: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct State {
     timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct FinalTreeHead {
     tree_size: u64,
     sha256_root_hash: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ReadOnlyState {
     #[serde(flatten)]
     state: State,
@@ -59,6 +63,7 @@ enum StateType {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct Log {
     description: Option<String>,
     key: String,
@@ -72,6 +77,7 @@ struct Log {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct Operator {
     name: String,
     email: Vec<String>,
@@ -79,6 +85,7 @@ struct Operator {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct CTList {
     version: Option<String>,
     operators: Vec<Operator>,
@@ -147,6 +154,7 @@ pub fn get_logs(client: reqwest::blocking::Client) -> Result<Vec<crate::client::
             if let Some(StateType::Usable(_)) = log.state {
                 let name = log.description.unwrap_or(log.log_id.clone());
                 out.push(crate::client::CTLog {
+                    operator: operator.name.clone(),
                     name,
                     id: log.log_id,
                     public_key: match openssl::pkey::PKey::public_key_from_der(

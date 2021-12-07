@@ -3,6 +3,7 @@ use std::convert::TryFrom;
 
 #[derive(Debug, Clone)]
 pub struct CTLog {
+    pub operator: String,
     pub name: String,
     pub id: String,
     pub public_key: openssl::pkey::PKey<openssl::pkey::Public>,
@@ -30,6 +31,7 @@ struct EntriesJSON {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ConsistencyJSON {
     consistency: Vec<String>,
 }
@@ -480,7 +482,7 @@ impl<'a> GetEntries<'a> {
         } else if decode_buf.len() != 0 {
             return Err(format!("Left over bytes on merkle leaf from '{}'", self.log.name));
         }
-        
+
         Ok(Entry {
             index,
             tree_leaf: merkle_leaf,
@@ -632,6 +634,8 @@ pub fn get_sth(client: &reqwest::blocking::Client, log: &CTLog) -> Result<Signed
     if !verified {
         return Err(format!("Invalid signature on tree head from '{}'", log.name));
     }
+
+    crate::api::LOG_STATS.lock().unwrap().get_mut(&log.id).unwrap().update_last_contact();
 
     Ok(SignedTreeHead {
         tree_size: sth.tree_size,

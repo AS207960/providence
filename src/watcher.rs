@@ -43,7 +43,6 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
             self.tree.load(&save);
         }
 
-
         let mut sth = loop {
             match crate::client::get_sth(&self.client, &self.log) {
                 Ok(sth) => {
@@ -55,6 +54,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                 }
             }
         };
+        crate::api::LOG_STATS.lock().unwrap().get_mut(&self.log.id).unwrap().update_from_sth(&sth);
 
         info!("Watching '{}'...", self.log.name);
         let mut last_offset_time = Utc::now();
@@ -74,13 +74,14 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
             if sth.tree_size > self.tree.tree_size() {
                 let tree_size = self.tree.tree_size();
 
-                let should_emmit = (sth.tree_size - tree_size) < 1000;
+                let difference = sth.tree_size - tree_size;
+                let should_emmit = difference < 1000;
                 let mut emmit_entries = Vec::with_capacity(if should_emmit {
-                    (sth.tree_size - tree_size) as usize
+                    difference as usize
                 } else {
                     0
                 });
-                info!("New STH for '{}'; size {}; emmiting: {}", self.log.name, sth.tree_size, should_emmit);
+                info!("New STH for '{}'; size {}; backlog {}; emitting: {}", self.log.name, sth.tree_size, difference, should_emmit);
 
                 let (entry_tx, entry_rx) = std::sync::mpsc::sync_channel(100);
                 let mut new_tree = self.tree.clone();
@@ -120,6 +121,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                     &self.client, &self.log, sth.tree_size, tree_size, last_offset_time,
                 );
                 let mut processed_entries: u64 = 0;
+                let mut last_update: u64 = 0;
                 for entries in &mut entries_iter {
                     let entries = match entries {
                         Ok(v) => v,
@@ -133,6 +135,18 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                     if should_emmit {
                       emmit_entries.extend(entries.iter().cloned());
                     }
+
+                    if processed_entries - last_update > 100 || processed_entries == difference {
+                        last_update = processed_entries;
+                        if let Some(last_entry) = entries.as_slice().last() {
+                            if let Some(entry) = &last_entry.tree_leaf {
+                                let crate::client::MerkleTreeLeafValue::TimestampedEntry(t_entry) = &entry.leaf;
+                                crate::api::LOG_STATS.lock().unwrap().get_mut(&self.log.id).unwrap()
+                                    .update_last_entry(t_entry.timestamp.clone(), difference - processed_entries);
+                            }
+                        }
+                    }
+
                     match entry_tx.send(entries.into_iter().map(|e| e.leaf_bytes).collect::<Vec<Vec<u8>>>()) {
                         Ok(_) => {}
                         Err(_) => {
@@ -150,7 +164,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                         continue 'outer;
                     }
                 };
-                assert_eq!(processed_entries, sth.tree_size - tree_size);
+                assert_eq!(processed_entries, difference);
                 assert_eq!(sth.tree_size, new_tree.tree_size());
                 info!("Up to date on '{}'", self.log.name);
                 let mth = match new_tree.root_hash() {
