@@ -205,7 +205,7 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
             std::thread::sleep(std::time::Duration::from_secs(5));
             match crate::client::get_sth(&self.client, &self.log) {
                 Ok(new_sth) => {
-                    sth = new_sth
+                    sth = new_sth;
                     crate::api::LOG_STATS.lock().unwrap().get_mut(&self.log.id).unwrap().update_from_sth(&sth);
                 }
                 Err(err) => {
