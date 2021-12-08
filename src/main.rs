@@ -155,65 +155,126 @@ fn main() {
         }
     });
 
-    info!("Starting RabbitMQ client");
-    let mut amqp_conn = amiquip::Connection::insecure_open(&std::env::var("RABBITMQ_URL").expect("No RABBITMQ_URL variable"))
-        .expect("Unable to connect to RabbitMQ server");
-    let amqp_channel = amqp_conn.open_channel(None).expect("Unable to open RabbitMQ channel");
+    let rabbitmq_url = std::env::var("RABBITMQ_URL").expect("No RABBITMQ_URL variable");
 
     std::thread::spawn(move || {
-        let pub_exchange = amqp_channel.exchange_declare(
-            amiquip::ExchangeType::Fanout,
-            "providence_raw",
-            amiquip::ExchangeDeclareOptions {
-                durable: true,
-                ..amiquip::ExchangeDeclareOptions::default()
-            },
-        ).expect("Unable to declare RabbitMQ exchange");
+        let (unsent_events_tx, unsent_events_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(100);
 
-        for evt in event_rx.iter() {
-            if let Some(leaf) = evt.entry.tree_leaf {
-                let proto_evt = proto::RawEvent {
-                    timestamp: chrono_to_proto(Some(Utc::now())),
-                    event: Some(proto::raw_event::Event::LeafEvent(proto::LeafEvent {
-                        index: evt.entry.index,
-                        url: format!("{}ct/v1/get-entries?start={}&end={}", evt.log.url, evt.entry.index, evt.entry.index),
-                        source: Some(proto::CtLog {
-                            name: evt.log.name,
-                            id: evt.log.id,
-                            url: evt.log.url,
-                        }),
-                        entry: match leaf.leaf {
-                            client::MerkleTreeLeafValue::TimestampedEntry(te) => Some(proto::leaf_event::Entry::TimestampedEntry(proto::TimestampedEntry {
-                                timestamp: chrono_to_proto(Some(te.timestamp)),
-                                extensions: te.extensions.0,
-                                entry: Some(match te.entry {
-                                    client::LogEntry::X509Entry(asn1) => proto::timestamped_entry::Entry::Asn1Cert(proto::Asn1Cert {
-                                        leaf_certificate: asn1.leaf_certificate,
-                                        certificate_chain: asn1.certificate_chain,
-                                    }),
-                                    client::LogEntry::PreCert(pre_cert) => proto::timestamped_entry::Entry::PreCert(proto::PreCert {
-                                        issuer_key_hash: pre_cert.issuer_key_hash.to_vec(),
-                                        tbs_certificate: pre_cert.tbs_certificate,
-                                        leaf_certificate: pre_cert.leaf_certificate,
-                                        certificate_chain: pre_cert.certificate_chain,
-                                    })
-                                }),
-                            }))
-                        },
-                    })),
-                };
+        loop {
+            info!("Starting RabbitMQ client");
+            let mut amqp_conn = match amiquip::Connection::insecure_open(&rabbitmq_url) {
+                Ok(c) => c,
+                Err(err) => {
+                    error!("Unable to connect to RabbitMQ server: {}", err);
+                    std::thread::sleep(std::time::Duration::from_secs(15));
+                    continue;
+                }
+            };
 
-                let mut buf = Vec::new();
-                buf.reserve(proto_evt.encoded_len());
-                proto_evt.encode(&mut buf).unwrap();
+            let amqp_channel = match amqp_conn.open_channel(None) {
+                Ok(c) => c,
+                Err(err) => {
+                    error!("Unable to open RabbitMQ channel: {}", err);
+                    std::thread::sleep(std::time::Duration::from_secs(15));
+                    continue;
+                }
+            };
 
-                pub_exchange.publish(amiquip::Publish {
-                    body: &buf,
+            let pub_exchange = match amqp_channel.exchange_declare(
+                amiquip::ExchangeType::Fanout,
+                "providence_raw",
+                amiquip::ExchangeDeclareOptions {
+                    durable: true,
+                    ..amiquip::ExchangeDeclareOptions::default()
+                },
+            ) {
+                Ok(c) => c,
+                Err(err) => {
+                    error!("Unable to declare RabbitMQ exchange: {}", err);
+                    std::thread::sleep(std::time::Duration::from_secs(15));
+                    continue;
+                }
+            };
+
+            while let Ok(e) = unsent_events_rx.try_recv() {
+                match pub_exchange.publish(amiquip::Publish {
+                    body: &e,
                     routing_key: "".to_string(),
                     immediate: false,
                     mandatory: false,
                     properties: amiquip::AmqpProperties::default(),
-                }).expect("Unable to publish message");
+                }) {
+                    Ok(_) => {}
+                    Err(err) => {
+                        match unsent_events_tx.try_send(e) {
+                            Ok(_) => {}
+                            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => unreachable!(),
+                            Err(std::sync::mpsc::TrySendError::Full(_)) => {}
+                        }
+                        error!("Unable to publish message: {}", err);
+                        std::thread::sleep(std::time::Duration::from_secs(15));
+                        continue;
+                    }
+                };
+            }
+
+            for evt in event_rx.iter() {
+                if let Some(leaf) = evt.entry.tree_leaf {
+                    let proto_evt = proto::RawEvent {
+                        timestamp: chrono_to_proto(Some(Utc::now())),
+                        event: Some(proto::raw_event::Event::LeafEvent(proto::LeafEvent {
+                            index: evt.entry.index,
+                            url: format!("{}ct/v1/get-entries?start={}&end={}", evt.log.url, evt.entry.index, evt.entry.index),
+                            source: Some(proto::CtLog {
+                                name: evt.log.name,
+                                id: evt.log.id,
+                                url: evt.log.url,
+                            }),
+                            entry: match leaf.leaf {
+                                client::MerkleTreeLeafValue::TimestampedEntry(te) => Some(proto::leaf_event::Entry::TimestampedEntry(proto::TimestampedEntry {
+                                    timestamp: chrono_to_proto(Some(te.timestamp)),
+                                    extensions: te.extensions.0,
+                                    entry: Some(match te.entry {
+                                        client::LogEntry::X509Entry(asn1) => proto::timestamped_entry::Entry::Asn1Cert(proto::Asn1Cert {
+                                            leaf_certificate: asn1.leaf_certificate,
+                                            certificate_chain: asn1.certificate_chain,
+                                        }),
+                                        client::LogEntry::PreCert(pre_cert) => proto::timestamped_entry::Entry::PreCert(proto::PreCert {
+                                            issuer_key_hash: pre_cert.issuer_key_hash.to_vec(),
+                                            tbs_certificate: pre_cert.tbs_certificate,
+                                            leaf_certificate: pre_cert.leaf_certificate,
+                                            certificate_chain: pre_cert.certificate_chain,
+                                        })
+                                    }),
+                                }))
+                            },
+                        })),
+                    };
+
+                    let mut buf = Vec::new();
+                    buf.reserve(proto_evt.encoded_len());
+                    proto_evt.encode(&mut buf).unwrap();
+
+                    match pub_exchange.publish(amiquip::Publish {
+                        body: &buf,
+                        routing_key: "".to_string(),
+                        immediate: false,
+                        mandatory: false,
+                        properties: amiquip::AmqpProperties::default(),
+                    }) {
+                        Ok(_) => {}
+                        Err(err) => {
+                            match unsent_events_tx.try_send(buf) {
+                                Ok(_) => {}
+                                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => unreachable!(),
+                                Err(std::sync::mpsc::TrySendError::Full(_)) => {}
+                            }
+                            error!("Unable to publish message: {}", err);
+                            std::thread::sleep(std::time::Duration::from_secs(15));
+                            continue;
+                        }
+                    };
+                }
             }
         }
     });
