@@ -1,8 +1,10 @@
 use chrono::prelude::*;
+use crate::client::CTLog;
 
-const LOG_LIST_KEY: &'static str = include_str!("google_log_list_key.pem");
-const LOG_LIST_URL: &'static str = "https://www.gstatic.com/ct/log_list/v2/log_list.json";
-const LOG_LIST_SIG_URL: &'static str = "https://www.gstatic.com/ct/log_list/v2/log_list.sig";
+const GOOGLE_LOG_LIST_KEY: &'static str = include_str!("google_log_list_key.pem");
+const GOOGLE_LOG_LIST_URL: &'static str = "https://www.gstatic.com/ct/log_list/v2/log_list.json";
+const GOOGLE_LOG_LIST_SIG_URL: &'static str = "https://www.gstatic.com/ct/log_list/v2/log_list.sig";
+const APPLE_LOG_LIST_URL: &'static str = "https://valid.apple.com/ct/log_list/current_log_list.json";
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 enum LogType {
@@ -74,6 +76,7 @@ struct Log {
     #[serde(default)]
     log_type: LogType,
     state: Option<StateType>,
+    temporal_interval: Option<TemporalInterval>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,95 +89,130 @@ struct Operator {
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct CTList {
+struct GoogleCTList {
     version: Option<String>,
+    operators: Vec<Operator>,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct AppleCTList {
+    version: String,
+    #[serde(rename = "assetVersion")]
+    asset_version: u32,
     operators: Vec<Operator>,
 }
 
 pub fn get_logs(client: reqwest::blocking::Client) -> Result<Vec<crate::client::CTLog>, String> {
     info!("Fetching list of CT logs from Google");
-    let list = match match client.get(LOG_LIST_URL).send() {
+    let google_list = match match client.get(GOOGLE_LOG_LIST_URL).send() {
         Ok(v) => v,
         Err(err) => {
-            return Err(format!("unable to download CT list: {}", err));
+            return Err(format!("unable to download Google CT list: {}", err));
         }
     }.bytes() {
         Ok(v) => v,
         Err(err) => {
-            return Err(format!("unable to read CT list: {}", err));
+            return Err(format!("unable to read Google CT list: {}", err));
         }
     };
-    let list_obj = match serde_json::from_slice::<CTList>(&list) {
+    let google_list_obj = match serde_json::from_slice::<GoogleCTList>(&google_list) {
         Ok(v) => v,
         Err(err) => {
-            return Err(format!("unable to decode CT list: {}", err));
+            return Err(format!("unable to decode Google CT list: {}", err));
         }
     };
-    let list_sig = match match client.get(LOG_LIST_SIG_URL).send() {
+    let google_list_sig = match match client.get(GOOGLE_LOG_LIST_SIG_URL).send() {
         Ok(v) => v,
         Err(err) => {
-            return Err(format!("unable to download CT list signature: {}", err));
+            return Err(format!("unable to download Google CT list signature: {}", err));
         }
     }.bytes() {
         Ok(v) => v,
         Err(err) => {
-            return Err(format!("unable to read CT list signature: {}", err));
+            return Err(format!("unable to read Google CT list signature: {}", err));
         }
     };
 
-    let pub_key = openssl::pkey::PKey::public_key_from_pem(LOG_LIST_KEY.as_bytes())
+    let google_pub_key = openssl::pkey::PKey::public_key_from_pem(GOOGLE_LOG_LIST_KEY.as_bytes())
         .expect("Unable to decode CT list signing key");
     let mut verifier = match openssl::sign::Verifier::new(
         openssl::hash::MessageDigest::sha256(),
-        &pub_key,
+        &google_pub_key,
     ) {
         Ok(v) => v,
         Err(err) => {
-            return Err(format!("unable to create CT list verifier: {}", err));
+            return Err(format!("unable to create Google CT list verifier: {}", err));
         }
     };
 
-    let verified = match verifier.verify_oneshot(&list_sig, &list) {
+    let google_verified = match verifier.verify_oneshot(&google_list_sig, &google_list) {
         Ok(v) => v,
         Err(err) => {
-            return Err(format!("unable to verify CT list signature: {}", err));
+            return Err(format!("unable to verify Google CT list signature: {}", err));
         }
     };
 
-    if !verified {
-        return Err("CT list signature does not verify".to_string());
+    if !google_verified {
+        return Err("Google CT list signature does not verify".to_string());
     }
 
-    let mut out = vec![];
-    for operator in list_obj.operators {
+    info!("Fetching list of CT logs from Apple");
+    let apple_list = match match client.get(APPLE_LOG_LIST_URL).send() {
+        Ok(v) => v,
+        Err(err) => {
+            return Err(format!("unable to download Apple CT list: {}", err));
+        }
+    }.bytes() {
+        Ok(v) => v,
+        Err(err) => {
+            return Err(format!("unable to read Apple CT list: {}", err));
+        }
+    };
+    let apple_list_obj = match serde_json::from_slice::<AppleCTList>(&apple_list) {
+        Ok(v) => v,
+        Err(err) => {
+            return Err(format!("unable to decode Apple CT list: {}", err));
+        }
+    };
+
+    let mut out = std::collections::HashMap::<String, CTLog>::new();
+    for operator in google_list_obj.operators.into_iter().chain(apple_list_obj.operators.into_iter()) {
         for log in operator.logs {
             if log.log_type != LogType::Production {
                 continue;
             }
+            if let Some(temporal_interval) = &log.temporal_interval {
+                if temporal_interval.end_exclusive < Utc::now() {
+                    continue;
+                }
+            }
             if let Some(StateType::Usable(_)) = log.state {
-                let name = log.description.unwrap_or(log.log_id.clone());
-                out.push(crate::client::CTLog {
-                    operator: operator.name.clone(),
-                    name,
-                    id: log.log_id,
-                    public_key: match openssl::pkey::PKey::public_key_from_der(
-                        match &base64::decode(log.key) {
+                if !out.contains_key(&log.log_id) {
+                    let name = log.description.unwrap_or(log.log_id.clone());
+                    out.insert(log.log_id.clone(), crate::client::CTLog {
+                        operator: operator.name.clone(),
+                        name,
+                        id: log.log_id,
+                        public_key: match openssl::pkey::PKey::public_key_from_der(
+                            match &base64::decode(log.key) {
+                                Ok(v) => v,
+                                Err(err) => {
+                                    return Err(format!("invalid base64 encoding: {}", err));
+                                }
+                            }
+                        ) {
                             Ok(v) => v,
                             Err(err) => {
-                                return Err(format!("invalid base64 encoding: {}", err));
+                                return Err(format!("invalid public key: {}", err));
                             }
-                        }
-                    ) {
-                        Ok(v) => v,
-                        Err(err) => {
-                            return Err(format!("invalid public key: {}", err));
-                        }
-                    },
-                    url: log.url,
-                    mmd: chrono::Duration::seconds(log.mmd as i64),
-                })
+                        },
+                        url: log.url,
+                        mmd: chrono::Duration::seconds(log.mmd as i64),
+                    });
+                }
             }
         }
     }
-    Ok(out)
+    Ok(out.into_values().collect())
 }
