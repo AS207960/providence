@@ -160,7 +160,7 @@ fn main() {
     std::thread::spawn(move || {
         let (unsent_events_tx, unsent_events_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(100);
 
-        loop {
+        'main: loop {
             info!("Starting RabbitMQ client");
             let mut amqp_conn = match amiquip::Connection::insecure_open(&rabbitmq_url) {
                 Ok(c) => c,
@@ -213,7 +213,7 @@ fn main() {
                         }
                         error!("Unable to publish message: {}", err);
                         std::thread::sleep(std::time::Duration::from_secs(15));
-                        continue;
+                        continue 'main;
                     }
                 };
             }
@@ -271,7 +271,7 @@ fn main() {
                             }
                             error!("Unable to publish message: {}", err);
                             std::thread::sleep(std::time::Duration::from_secs(15));
-                            continue;
+                            continue 'main;
                         }
                     };
                 }
