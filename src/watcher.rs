@@ -54,7 +54,9 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                 }
             }
         };
-        crate::api::LOG_STATS.lock().unwrap().get_mut(&self.log.id).unwrap().update_from_sth(&sth);
+        if let Some(ls) = crate::api::LOG_STATS.lock().unwrap().get_mut(&self.log.id) {
+            ls.update_from_sth(&sth);
+        }
 
         info!("Watching '{}'...", self.log.name);
         let mut last_offset_time = Utc::now();
@@ -141,8 +143,9 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
                         if let Some(last_entry) = entries.as_slice().last() {
                             if let Some(entry) = &last_entry.tree_leaf {
                                 let crate::client::MerkleTreeLeafValue::TimestampedEntry(t_entry) = &entry.leaf;
-                                crate::api::LOG_STATS.lock().unwrap().get_mut(&self.log.id).unwrap()
-                                    .update_last_entry(t_entry.timestamp.clone(), difference - processed_entries);
+                                if let Some(ls) = crate::api::LOG_STATS.lock().unwrap().get_mut(&self.log.id) {
+                                    ls.update_last_entry(t_entry.timestamp.clone(), difference - processed_entries);
+                                }
                             }
                         }
                     }
@@ -206,7 +209,9 @@ impl<S: 'static + CTLogStorage + std::marker::Send + Clone> CTWatcher<S> {
             match crate::client::get_sth(&self.client, &self.log) {
                 Ok(new_sth) => {
                     sth = new_sth;
-                    crate::api::LOG_STATS.lock().unwrap().get_mut(&self.log.id).unwrap().update_from_sth(&sth);
+                    if let Some(ls) = crate::api::LOG_STATS.lock().unwrap().get_mut(&self.log.id) {
+                        ls.update_from_sth(&sth);
+                    }
                 }
                 Err(err) => {
                     error!("Can't fetch new STH from '{}': {}", self.log.name, err);
