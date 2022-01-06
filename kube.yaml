@@ -55,7 +55,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: as207960/providence-api:1
+          image: as207960/providence-api:2
           imagePullPolicy: IfNotPresent
           env:
             - name: RUST_LOG

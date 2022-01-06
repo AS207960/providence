@@ -305,7 +305,8 @@ async fn firehose(
         Ok(c) => c,
         Err(err) => {
             error!("Unable to open RabbitMQ channel: {}", err);
-            return Err(rocket::http::Status::InternalServerError);
+            std::process::exit(-1);
+            // return Err(rocket::http::Status::InternalServerError);
         }
     };
 
