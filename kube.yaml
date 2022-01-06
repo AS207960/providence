@@ -55,7 +55,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: as207960/providence-api:2
+          image: as207960/providence-api:3
           imagePullPolicy: IfNotPresent
           env:
             - name: RUST_LOG
@@ -71,7 +71,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /pingu
-              port: 8080
+              port: 8000
             initialDelaySeconds: 3
             periodSeconds: 3
 ---

@@ -15,8 +15,15 @@ mod proto {
 }
 
 #[get("/pingu")]
-fn pingu() -> &'static str {
-    "NOOT NOOT"
+async fn pingu(
+    amqp_conn: &rocket::State<tokio::sync::Mutex<amiquip::Connection>>
+) -> Result<&'static str, rocket::http::Status> {
+    if let Err(err) = amqp_conn.lock().await.open_channel(None) {
+        error!("Unable to open RabbitMQ channel: {}", err);
+        return Err(rocket::http::Status::InternalServerError);
+    }
+
+    Ok("NOOT NOOT")
 }
 
 #[derive(Serialize)]
@@ -305,8 +312,7 @@ async fn firehose(
         Ok(c) => c,
         Err(err) => {
             error!("Unable to open RabbitMQ channel: {}", err);
-            std::process::exit(-1);
-            // return Err(rocket::http::Status::InternalServerError);
+            return Err(rocket::http::Status::InternalServerError);
         }
     };
 
